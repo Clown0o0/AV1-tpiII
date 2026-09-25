@@ -1,0 +1,189 @@
+// Modelo de persistência do microsserviço cinebridge-recomendacao.
+// Apenas src/repositories/ conhece este schema (via @prisma/client).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PapelTecnico {
+  DIRETOR
+  DIRETOR_FOTOGRAFIA
+  SONOPLASTA
+  EDITOR
+  ROTEIRISTA
+  EFEITOS_VISUAIS
+}
+
+enum TipoCaptacao {
+  DOCUMENTARIO
+  FICCAO
+  ANIMACAO
+}
+
+enum TipoEstrategia {
+  COSSENO
+  FILTRAGEM_COLABORATIVA
+  ORCAMENTO_REDUZIDO
+}
+
+enum StatusRecomendacao {
+  EM_ANDAMENTO
+  FINALIZADA
+  OBSOLETA
+}
+
+enum StatusMembro {
+  SUGERIDO
+  CONVIDADO
+  CONFIRMADO
+  REJEITADO
+  RECUSADO
+  SUBSTITUIDO
+}
+
+enum StatusConvite {
+  PENDENTE
+  ACEITO
+  RECUSADO
+  CANCELADO
+}
+
+model Projeto {
+  id                 String         @id @default(uuid()) @db.Uuid
+  titulo             String
+  produtorId         String
+  produtorEmail      String?
+  genero             String
+  duracaoEstimadaMin Int
+  orcamentoTotal     Decimal        @db.Decimal(14, 2)
+  dataEntrega        DateTime
+  tipoCaptacao       TipoCaptacao
+  localizacao        String
+  estrategia         TipoEstrategia @default(COSSENO)
+  criadoEm           DateTime       @default(now())
+  papeis             ProjetoPapel[]
+  recomendacoes      Recomendacao[]
+  convites           Convite[]
+
+  @@index([produtorId])
+}
+
+// Papel técnico obrigatório do projeto, com peso de importância relativa.
+model ProjetoPapel {
+  projetoId             String       @db.Uuid
+  papel                 PapelTecnico
+  peso                  Float
+  competenciasDesejadas Json?
+  projeto               Projeto      @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+
+  @@id([projetoId, papel])
+}
+
+model Profissional {
+  id                String              @id @default(uuid()) @db.Uuid
+  nome              String
+  email             String              @unique
+  especialidades    PapelTecnico[]
+  precoMin          Decimal             @db.Decimal(12, 2)
+  precoMax          Decimal             @db.Decimal(12, 2)
+  localizacao       String
+  historicoProjetos String[]
+  competencias      Competencia[]
+  avaliacoes        Avaliacao[]
+  disponibilidades  Disponibilidade[]
+  membros           MembroRecomendado[]
+  convites          Convite[]
+
+  @@index([especialidades], type: Gin)
+  @@index([precoMin])
+}
+
+model Disponibilidade {
+  id             String       @id @default(uuid()) @db.Uuid
+  profissionalId String       @db.Uuid
+  inicio         DateTime
+  fim            DateTime
+  profissional   Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+
+  @@index([profissionalId, inicio, fim])
+}
+
+model Competencia {
+  id             String       @id @default(uuid()) @db.Uuid
+  profissionalId String       @db.Uuid
+  nome           String
+  nivel          Float
+  profissional   Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+
+  @@unique([profissionalId, nome])
+}
+
+model Avaliacao {
+  id             String       @id @default(uuid()) @db.Uuid
+  profissionalId String       @db.Uuid
+  autorId        String
+  projetoId      String?
+  nota           Int
+  comentario     String?
+  criadaEm       DateTime     @default(now())
+  profissional   Profissional @relation(fields: [profissionalId], references: [id], onDelete: Cascade)
+
+  @@index([profissionalId])
+  @@index([autorId])
+}
+
+model Recomendacao {
+  id           String              @id @default(uuid()) @db.Uuid
+  projetoId    String              @db.Uuid
+  estrategia   TipoEstrategia
+  status       StatusRecomendacao  @default(EM_ANDAMENTO)
+  parcial      Boolean             @default(false)
+  avisos       String[]
+  rodadas      Int                 @default(1)
+  criadaEm     DateTime            @default(now())
+  finalizadaEm DateTime?
+  projeto      Projeto             @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  membros      MembroRecomendado[]
+  convites     Convite[]
+
+  @@index([projetoId, status])
+}
+
+// Membro sugerido de uma recomendação (inclui histórico de rejeições/substituições).
+model MembroRecomendado {
+  id             String       @id @default(uuid()) @db.Uuid
+  recomendacaoId String       @db.Uuid
+  papel          PapelTecnico
+  profissionalId String       @db.Uuid
+  score          Float
+  custo          Decimal      @db.Decimal(12, 2)
+  status         StatusMembro
+  rodada         Int
+  alternativas   Json
+  recomendacao   Recomendacao @relation(fields: [recomendacaoId], references: [id], onDelete: Cascade)
+  profissional   Profissional @relation(fields: [profissionalId], references: [id])
+
+  @@index([recomendacaoId])
+}
+
+model Convite {
+  id             String        @id @default(uuid()) @db.Uuid
+  recomendacaoId String        @db.Uuid
+  projetoId      String        @db.Uuid
+  profissionalId String        @db.Uuid
+  papel          PapelTecnico
+  status         StatusConvite @default(PENDENTE)
+  criadoEm       DateTime      @default(now())
+  respondidoEm   DateTime?
+  recomendacao   Recomendacao  @relation(fields: [recomendacaoId], references: [id], onDelete: Cascade)
+  projeto        Projeto       @relation(fields: [projetoId], references: [id], onDelete: Cascade)
+  profissional   Profissional  @relation(fields: [profissionalId], references: [id])
+
+  @@index([recomendacaoId])
+  @@index([profissionalId])
+}
